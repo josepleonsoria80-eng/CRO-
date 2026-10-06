@@ -33,6 +33,20 @@ Solo se crea una herramienta si el comportamiento tiene efecto **estadísticamen
 python -m cro_ai demo                     # simula 5000 sesiones → analiza → genera. Lee data/demo/out/informe.md
 ```
 
+### Probarlo en una tienda demo (2 minutos)
+
+```bash
+python -m cro_ai demo-store            # tienda demo + widget + herramientas, en http://localhost:8000
+```
+
+Abre `http://localhost:8000/product/1?cro_speed=5` (el parámetro acelera los temporizadores x5) y espera unos segundos: aparece el nudge de reseñas. Prueba también:
+- **Producto → bajar hasta "Opiniones"** (el evento `view_reviews` se registra y el nudge ya no salta).
+- **Carrito con ratón saliendo por arriba** (exit-intent) → `cart_recovery`.
+- **Navegar por 3 productos** → panel "Lo que has visto".
+- `?cro_variant=control` fuerza el grupo de control (no verás nudges, pero se registra `cro_eligible`).
+
+Tu navegación queda en `data/demo-store/live_events.jsonl`; el informe con lo aprendido, en `data/demo-store/out/informe.md`. El comando rastrea la propia tienda, aprende de 5.000 sesiones históricas simuladas y genera las herramientas con copy verificado contra la tienda. Con `--holdout 10` reservas un 10 % de control y luego `python -m cro_ai experiment --events data/demo-store/live_events.jsonl` compara los grupos (necesita cientos de sesiones por grupo).
+
 Flujo real:
 
 ```bash

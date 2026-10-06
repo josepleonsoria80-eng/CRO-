@@ -33,7 +33,7 @@ def clean_event(raw: dict) -> dict | None:
             "url": str(raw.get("url", ""))[:200], "props": props}
 
 
-def make_handler(serve_dir: Path, events_path: Path, allow_origin: str):
+def make_handler(serve_dir: Path, events_path: Path, allow_origin: str, site=None):
     class Handler(BaseHTTPRequestHandler):
         def _cors(self):
             self.send_header("Access-Control-Allow-Origin", allow_origin)
@@ -48,11 +48,15 @@ def make_handler(serve_dir: Path, events_path: Path, allow_origin: str):
             routes = {"/cro-widget.js": (STATIC / "cro-widget.js", "application/javascript"),
                       "/cro-config.json": (serve_dir / "cro-config.json", "application/json")}
             hit = routes.get(self.path.split("?")[0])
-            if not hit or not hit[0].exists():
+            page = site(self.path) if (site and not hit) else None
+            if page is not None:
+                hit, data = (None, "text/html"), page.encode()
+            elif not hit or not hit[0].exists():
                 self.send_response(404)
                 self.end_headers()
                 return
-            data = hit[0].read_bytes()
+            else:
+                data = hit[0].read_bytes()
             self.send_response(200)
             self.send_header("Content-Type", hit[1] + "; charset=utf-8")
             self.send_header("Cache-Control", "no-cache")
@@ -90,8 +94,8 @@ def make_handler(serve_dir: Path, events_path: Path, allow_origin: str):
     return Handler
 
 
-def serve(serve_dir: str, events_path: str, port: int = 8000, allow_origin: str = "*") -> ThreadingHTTPServer:
+def serve(serve_dir: str, events_path: str, port: int = 8000, allow_origin: str = "*", site=None) -> ThreadingHTTPServer:
     events = Path(events_path)
     events.parent.mkdir(parents=True, exist_ok=True)
-    srv = ThreadingHTTPServer(("0.0.0.0", port), make_handler(Path(serve_dir), events, allow_origin))
+    srv = ThreadingHTTPServer(("0.0.0.0", port), make_handler(Path(serve_dir), events, allow_origin, site))
     return srv

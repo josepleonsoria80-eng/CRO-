@@ -38,6 +38,14 @@
   }
   function save() { try { sessionStorage.setItem(STORE_KEY, JSON.stringify(state)); } catch (e) { /* modo privado */ } }
   load();
+  // Solo para pruebas manuales en TU navegador: ?cro_variant=treatment|control y ?cro_speed=5 (temporizadores x5 más rápidos).
+  try {
+    var qp = new URLSearchParams(location.search);
+    if (qp.get('cro_variant')) state.force = qp.get('cro_variant');
+    if (qp.get('cro_speed')) state.speed = Math.max(1, parseFloat(qp.get('cro_speed')) || 1);
+    save();
+  } catch (e) { /* sin URLSearchParams */ }
+  function speed() { return state.speed || 1; }
 
   var cfg = null, pageType = 'other', pageStart = Date.now(), exitFlag = false, timers = [];
   var visibleNow = null; // nudge en pantalla
@@ -60,6 +68,7 @@
     } catch (e) { return 'direct'; }
   }
   function variant() {
+    if (state.force === 'treatment' || state.force === 'control') return state.force;
     var pct = (cfg && cfg.experiment && cfg.experiment.holdout_pct) || 0;
     return state.bucket * 100 < pct ? 'control' : 'treatment';
   }
@@ -140,9 +149,9 @@
     if (g.min_page_views && state.pageViews < g.min_page_views) return false;
     if (g.exit_intent) {
       if (isTouch) {
-        if (!g.mobile_after_seconds || Date.now() - pageStart < g.mobile_after_seconds * 1000) return false;
+        if (!g.mobile_after_seconds || Date.now() - pageStart < g.mobile_after_seconds * 1000 / speed()) return false;
       } else if (!exitFlag) { return false; }
-    } else if (g.after_seconds && Date.now() - pageStart < g.after_seconds * 1000) {
+    } else if (g.after_seconds && Date.now() - pageStart < g.after_seconds * 1000 / speed()) {
       return false;
     }
     return true;
@@ -152,7 +161,7 @@
     if (!cfg || visibleNow) return;
     var exp = cfg.experiment || {};
     if (state.shown.length >= (exp.max_nudges_per_session || 2)) return;
-    if (Date.now() - lastNudgeAt < (exp.min_seconds_between_nudges || 20) * 1000) return;
+    if (Date.now() - lastNudgeAt < (exp.min_seconds_between_nudges || 20) * 1000 / speed()) return;
     var tools = (cfg.tools || []).slice().sort(function (a, b) { return a.priority - b.priority; });
     for (var i = 0; i < tools.length; i++) {
       var t = tools[i];
@@ -177,7 +186,7 @@
     (cfg.tools || []).forEach(function (t) {
       var g = t.trigger || {};
       var s = g.exit_intent ? (isTouch ? g.mobile_after_seconds : 0) : g.after_seconds;
-      if (s) timers.push(setTimeout(function () { evaluate('timer'); }, s * 1000 + 50));
+      if (s) timers.push(setTimeout(function () { evaluate('timer'); }, s * 1000 / speed() + 50));
     });
   }
 

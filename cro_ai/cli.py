@@ -7,7 +7,7 @@ import shutil
 import sys
 from pathlib import Path
 
-from . import ai, analysis, crawler, experiments, report as report_md, server, simulator, tools
+from . import ai, analysis, crawler, demo_store, experiments, report as report_md, server, simulator, tools
 from .events import read_jsonl, sessionize, write_jsonl
 
 STATIC = Path(__file__).parent / "static"
@@ -89,6 +89,34 @@ def cmd_demo(a) -> None:
     print(f"\nListo. Lee {d}/out/informe.md")
 
 
+def cmd_demo_store(a) -> None:
+    import threading
+    d = Path(a.dir)
+    out = d / "out"
+    out.mkdir(parents=True, exist_ok=True)
+    events = d / "live_events.jsonl"
+    srv = server.serve(str(out), str(events), a.port, "*", site=demo_store.render)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.1:{a.port}/"
+    # 1) rastrea la propia tienda demo, 2) aprende de tráfico histórico simulado, 3) genera herramientas
+    profile = crawler.crawl(base, max_pages=30, delay=0)
+    _dump(profile, d / "site_profile.json")
+    write_jsonl(simulator.simulate(5000, 7), d / "history.jsonl")
+    rep = analysis.analyze(sessionize(read_jsonl(d / "history.jsonl")))
+    _dump(rep, d / "report.json")
+    config = tools.generate_tools(rep, profile, holdout_pct=a.holdout)
+    _dump(config, out / "cro-config.json")
+    (out / "informe.md").write_text(report_md.render(rep, config), encoding="utf-8")
+    print(f"Tienda demo lista: {base}")
+    print(f"  · {len(config['tools'])} herramientas CRO activas (holdout {a.holdout}%). Informe: {out}/informe.md")
+    print("  · Truco: añade ?cro_speed=5 a la URL para acelerar los temporizadores x5 (p. ej. /product/1?cro_speed=5)")
+    print(f"  · Eventos de tu navegación → {events}\n  Ctrl+C para parar.")
+    try:
+        threading.Event().wait()
+    except KeyboardInterrupt:
+        srv.shutdown()
+
+
 def main(argv: list[str] | None = None) -> None:
     p = argparse.ArgumentParser(prog="cro-ai", description=__doc__)
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -124,6 +152,11 @@ def main(argv: list[str] | None = None) -> None:
     c.add_argument("--dir", default="data/demo"); c.add_argument("--sessions", type=int, default=5000)
     c.add_argument("--seed", type=int, default=7); c.add_argument("--no-ai", action="store_true")
     c.set_defaults(f=cmd_demo)
+
+    c = sub.add_parser("demo-store", help="levanta una tienda demo con el widget ya integrado")
+    c.add_argument("--dir", default="data/demo-store"); c.add_argument("--port", type=int, default=8000)
+    c.add_argument("--holdout", type=int, default=0, help="%% de sesiones de control (0 para ver siempre los nudges)")
+    c.set_defaults(f=cmd_demo_store)
 
     a = p.parse_args(argv)
     a.f(a)
