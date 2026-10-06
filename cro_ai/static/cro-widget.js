@@ -165,6 +165,7 @@
     var tools = (cfg.tools || []).slice().sort(function (a, b) { return a.priority - b.priority; });
     for (var i = 0; i < tools.length; i++) {
       var t = tools[i];
+      if (t.enabled === false) continue;                       // desactivada desde el backoffice
       if (state.shown.indexOf(t.id) >= 0 || state.dismissed.indexOf(t.id) >= 0) continue;
       if (!triggerOk(t, reason)) continue;
       fire(t);

@@ -12,4 +12,4 @@ cro-ai = "cro_ai.cli:main"
 include = ["cro_ai*"]
 
 [tool.setuptools.package-data]
-cro_ai = ["static/*.js"]
+cro_ai = ["static/*.js", "static/*.html"]

@@ -215,5 +215,113 @@ class CrawlerTest(unittest.TestCase):
         self.assertEqual(crawler.classify("http://a/order-received/12", p), "confirmation")
 
 
+class AdminTest(unittest.TestCase):
+    def setUp(self):
+        from cro_ai import admin as admin_mod
+        self.tmp = tempfile.TemporaryDirectory()
+        d = Path(self.tmp.name)
+        evs = []
+        for i in range(300):
+            variant = "control" if i % 10 == 0 else "treatment"
+            sid = f"s{i}"
+            evs.append(Event(sid, i, "page_view_product", "product", "/p/1", {"variant": variant, "device": "mobile"}))
+            evs.append(Event(sid, i + .1, "cro_eligible", "product", "", {"tool_id": "t1", "variant": variant}))
+            if variant == "treatment":
+                evs.append(Event(sid, i + .2, "cro_impression", "product", "", {"tool_id": "t1", "variant": variant}))
+                if i % 4 == 0:
+                    evs.append(Event(sid, i + .3, "cro_click", "product", "", {"tool_id": "t1", "variant": variant}))
+            if i % 5 == 0:
+                evs.append(Event(sid, i + .4, "purchase", "confirmation", "", {"value": 10.0, "variant": variant}))
+        write_jsonl(evs, d / "ev.jsonl")
+        with (d / "ev.jsonl").open("a") as f:
+            f.write("{linea rota\n")  # una línea corrupta no debe tumbar nada
+        cfg = {"experiment": {"holdout_pct": 10}, "gaps": [], "tools": [
+            {"id": "t1", "type": "social_proof_prompt", "priority": 1, "journey_stage": "evaluar", "trigger": {"page_type": "product"},
+             "content": {"title": "Titulo", "body": "Cuerpo", "cta": "Ok"}, "claims_verified": True}]}
+        (d / "cfg.json").write_text(json.dumps(cfg))
+        (d / "rep.json").write_text(json.dumps({"summary": {}}))
+        self.admin = admin_mod.Admin(d / "ev.jsonl", d / "cfg.json", d / "rep.json", "tok")
+        self.mod = admin_mod
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_tool_counts_are_unique_sessions_per_variant(self):
+        t = self.admin.tools()["tools"][0]
+        self.assertEqual((t["eligible"], t["impressions"], t["clicks"]), (300, 270, 60))
+        self.assertEqual(t["control_eligible"], 30)
+        self.assertAlmostEqual(t["ctr"], 60 / 270, places=3)
+
+    def test_overview_counts_and_ignores_corrupt_line(self):
+        o = self.admin.overview()
+        self.assertEqual((o["sessions"], o["buyers"]), (300, 60))
+        self.assertEqual(o["tool_impressions"], 270)
+
+    def test_events_filter_and_pagination(self):
+        page = self.admin.events_page(limit=10, name="purchase")
+        self.assertEqual(page["total"], 60)
+        self.assertEqual(len(page["items"]), 10)
+        self.assertTrue(all(e["name"] == "purchase" for e in page["items"]))
+        self.assertEqual(self.admin.events_page(session="s5")["total"], 4)  # view + eligible + impression + purchase
+
+    def test_update_tool_validates_and_marks_manual_copy_unverified(self):
+        t = self.admin.update_tool("t1", {"enabled": False, "title": "Nuevo título"})
+        self.assertFalse(t["enabled"])
+        self.assertEqual(t["copy_source"], "manual")
+        self.assertFalse(t["claims_verified"])
+        self.assertFalse(self.admin.tools()["tools"][0]["enabled"])
+        with self.assertRaises(ValueError):
+            self.admin.update_tool("t1", {"title": "x" * 46})
+        with self.assertRaises(ValueError):
+            self.admin.update_tool("t1", {"enabled": "si"})
+        with self.assertRaises(KeyError):
+            self.admin.update_tool("nope", {})
+
+    def test_http_auth_and_csrf(self):
+        srv = server.serve(self.tmp.name, str(Path(self.tmp.name) / "ev.jsonl"), port=0, admin=self.admin)
+        base = f"http://127.0.0.1:{srv.server_address[1]}"
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+
+        class NoRedirect(urllib.request.HTTPRedirectHandler):
+            def redirect_request(self, *a, **k):
+                return None
+        opener = urllib.request.build_opener(NoRedirect)
+
+        def call(path, method="GET", headers=None, body=None):
+            req = urllib.request.Request(base + path, data=body, method=method, headers=headers or {})
+            try:
+                r = opener.open(req)
+                return r.status, r.headers
+            except urllib.error.HTTPError as e:
+                return e.code, e.headers
+        try:
+            self.assertEqual(call("/admin")[0], 401)
+            self.assertEqual(call("/admin/api/tools")[0], 401)
+            self.assertEqual(call("/admin?token=mal")[0], 401)
+            code, hdr = call("/admin?token=tok")
+            self.assertEqual(code, 302)
+            cookie = hdr["Set-Cookie"].split(";")[0]
+            self.assertIn("HttpOnly", hdr["Set-Cookie"])
+            self.assertIn("SameSite=Strict", hdr["Set-Cookie"])
+            self.assertEqual(call("/admin/api/tools", headers={"Cookie": cookie})[0], 200)
+            self.assertNotIn("Access-Control-Allow-Origin", call("/admin/api/tools", headers={"Cookie": cookie})[1])
+            body = json.dumps({"enabled": False}).encode()
+            self.assertEqual(call("/admin/api/tools/t1", "POST", {"Cookie": cookie}, body)[0], 403)            # sin X-CRO-Admin
+            self.assertEqual(call("/admin/api/tools/t1", "POST", {"X-CRO-Admin": "1"}, body)[0], 403)          # sin cookie
+            self.assertEqual(call("/admin/api/tools/t1", "POST", {"Cookie": cookie, "X-CRO-Admin": "1"}, body)[0], 200)
+            # /collect sigue siendo público y no abre el backoffice
+            self.assertEqual(call("/admin/api/collect", "POST", {}, b"[]")[0], 403)
+        finally:
+            srv.shutdown(); srv.server_close()
+
+
+class FreeShippingTextTest(unittest.TestCase):
+    def test_picks_whole_phrase_without_cutting_words(self):
+        f = crawler.find_free_shipping_text
+        self.assertEqual(f(["Envío gratis en pedidos de más de 50 € · Devoluciones gratuitas en 30 días"]), "Envío gratis en pedidos de más de 50 €")
+        self.assertEqual(f(["x " * 100 + "envío gratis " + "y " * 100]), "")  # recorte sin la palabra clave: no se usa
+        self.assertEqual(f(["nada que ver"]), "")
+
+
 if __name__ == "__main__":
     unittest.main()

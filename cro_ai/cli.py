@@ -7,7 +7,7 @@ import shutil
 import sys
 from pathlib import Path
 
-from . import ai, analysis, crawler, demo_store, experiments, report as report_md, server, simulator, tools
+from . import admin as admin_mod, ai, analysis, crawler, demo_store, experiments, report as report_md, server, simulator, tools
 from .events import read_jsonl, sessionize, write_jsonl
 
 STATIC = Path(__file__).parent / "static"
@@ -37,6 +37,7 @@ def cmd_simulate(a) -> None:
 
 def cmd_analyze(a) -> None:
     rep = analysis.analyze(sessionize(read_jsonl(a.events)))
+    rep["data_source"] = {"kind": getattr(a, "source_kind", "real"), "file": str(a.events)}
     _dump(rep, Path(a.out))
     s = rep["summary"]
     print(f"{s['sessions']} sesiones, conversión {s['conversion_rate']:.1%}. Informe → {a.out}")
@@ -67,8 +68,10 @@ def cmd_generate(a) -> None:
 
 
 def cmd_serve(a) -> None:
-    srv = server.serve(a.dir, a.events, a.port, a.allow_origin)
+    adm = admin_mod.Admin(a.events, Path(a.dir) / "cro-config.json", a.report, admin_mod.new_token())
+    srv = server.serve(a.dir, a.events, a.port, a.allow_origin, admin=adm)
     print(f"Sirviendo en http://localhost:{a.port}  (widget: /cro-widget.js · eventos → {a.events})")
+    print(f"Backoffice: http://localhost:{a.port}/admin?token={adm.token}")
     try:
         srv.serve_forever()
     except KeyboardInterrupt:
@@ -83,7 +86,7 @@ def cmd_experiment(a) -> None:
 def cmd_demo(a) -> None:
     d = Path(a.dir)
     write_jsonl(simulator.simulate(a.sessions, a.seed), d / "events.jsonl")
-    cmd_analyze(argparse.Namespace(events=str(d / "events.jsonl"), out=str(d / "report.json")))
+    cmd_analyze(argparse.Namespace(events=str(d / "events.jsonl"), out=str(d / "report.json"), source_kind="simulated"))
     cmd_generate(argparse.Namespace(report=str(d / "report.json"), profile=None, out=str(d / "out"),
                                     holdout=10, events=None, no_ai=a.no_ai))
     print(f"\nListo. Lee {d}/out/informe.md")
@@ -95,7 +98,8 @@ def cmd_demo_store(a) -> None:
     out = d / "out"
     out.mkdir(parents=True, exist_ok=True)
     events = d / "live_events.jsonl"
-    srv = server.serve(str(out), str(events), a.port, "*", site=demo_store.render)
+    adm = admin_mod.Admin(events, out / "cro-config.json", d / "report.json", admin_mod.new_token())
+    srv = server.serve(str(out), str(events), a.port, "*", site=demo_store.render, admin=adm)
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     base = f"http://127.0.0.1:{a.port}/"
     # 1) rastrea la propia tienda demo, 2) aprende de tráfico histórico simulado, 3) genera herramientas
@@ -103,6 +107,7 @@ def cmd_demo_store(a) -> None:
     _dump(profile, d / "site_profile.json")
     write_jsonl(simulator.simulate(5000, 7), d / "history.jsonl")
     rep = analysis.analyze(sessionize(read_jsonl(d / "history.jsonl")))
+    rep["data_source"] = {"kind": "simulated", "file": str(d / "history.jsonl")}
     _dump(rep, d / "report.json")
     config = tools.generate_tools(rep, profile, holdout_pct=a.holdout)
     _dump(config, out / "cro-config.json")
@@ -110,7 +115,8 @@ def cmd_demo_store(a) -> None:
     print(f"Tienda demo lista: {base}")
     print(f"  · {len(config['tools'])} herramientas CRO activas (holdout {a.holdout}%). Informe: {out}/informe.md")
     print("  · Truco: añade ?cro_speed=5 a la URL para acelerar los temporizadores x5 (p. ej. /product/1?cro_speed=5)")
-    print(f"  · Eventos de tu navegación → {events}\n  Ctrl+C para parar.")
+    print(f"  · Eventos de tu navegación → {events}")
+    print(f"  · BACKOFFICE: http://localhost:{a.port}/admin?token={adm.token}\n  Ctrl+C para parar.")
     try:
         threading.Event().wait()
     except KeyboardInterrupt:
@@ -143,6 +149,7 @@ def main(argv: list[str] | None = None) -> None:
     c = sub.add_parser("serve", help="sirve el widget y recoge eventos")
     c.add_argument("--dir", default="out"); c.add_argument("--events", default="data/live_events.jsonl")
     c.add_argument("--port", type=int, default=8000); c.add_argument("--allow-origin", default="*")
+    c.add_argument("--report", default="data/report.json", help="informe para el backoffice")
     c.set_defaults(f=cmd_serve)
 
     c = sub.add_parser("experiment", help="mide tratamiento vs control")

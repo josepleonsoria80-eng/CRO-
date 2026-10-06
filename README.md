@@ -65,6 +65,23 @@ Con `ANTHROPIC_API_KEY` definida, `generate` usa Claude para el resumen y el cop
 
 El widget detecta el tipo de página por `<meta name="cro-page-type" content="product|cart|checkout|confirmation|category|home">` (o por URL) y engancha eventos por selectores CSS editables en `cro-config.json` (`event_selectors`). Para eventos propios: `croTrack('add_to_cart', {value: 59.9})`. En la página de confirmación añade `<meta name="cro-order-value" content="129.90">`.
 
+## Backoffice
+
+`demo-store` y `serve` incluyen un backoffice en `/admin` (sin dependencias). Al arrancar se imprime su URL con un token de acceso:
+
+```
+BACKOFFICE: http://localhost:8000/admin?token=XXXX
+```
+
+| Pestaña | Qué muestra |
+|---|---|
+| **Resumen** | Sesiones, compras, conversión, ingresos, veces que se mostró una herramienta y efecto tratamiento vs. control con su veredicto. |
+| **Herramientas CRO** | Por herramienta: veces elegible / mostrada / clics / CTR / descartes y conversión tratamiento vs. control. Permite **activar/desactivar** y **editar el copy** (se aplica en la siguiente carga de página). |
+| **Informe de lo aprendido** | Viaje ideal, comportamientos que empujan a comprar, secuencias, embudo y segmentos. Indica si el informe viene de datos **simulados**, **reales** o de origen desconocido. |
+| **Registros** | Eventos (filtro por tipo y sesión, paginados) y sesiones con su recorrido y las herramientas que vio. |
+
+Seguridad: acceso con token (`CRO_ADMIN_TOKEN` para fijarlo; si no, se genera uno aleatorio) que pasa a cookie `HttpOnly` + `SameSite=Strict`; las escrituras exigen además una cabecera anti-CSRF; `/admin` no envía cabeceras CORS; y los eventos, que llegan de internet por `/collect`, se pintan siempre como texto (nunca como HTML). Un copy editado a mano queda marcado como "sin verificar". **En producción sírvelo tras HTTPS** (el token viaja en la URL de entrada y la cookie no lleva `Secure` en `http://localhost`). Lee el JSONL completo en cada petición: suficiente para miles de sesiones; con más volumen conviene una base de datos.
+
 ## Rigor: lo que hay que saber
 
 - **Correlación ≠ causalidad.** Que quien lee reseñas compre más no prueba que obligar a leerlas venda más (los compradores ya eran más propensos). Por eso: (1) el odds ratio se ajusta por el resto de comportamientos, (2) la estimación de impacto lleva un descuento explícito y es solo una *hipótesis*, (3) el widget reserva un **grupo de control** (10 % por defecto) y `experiment` mide el efecto real. Escala solo lo que gane.

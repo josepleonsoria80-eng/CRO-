@@ -123,6 +123,22 @@ def _css(tag: str, a: dict) -> str:
     return tag
 
 
+FREE_SHIPPING_RE = re.compile(SIGNAL_KEYWORDS["free_shipping"], re.I)
+
+
+def find_free_shipping_text(chunks: list[str], max_len: int = 90) -> str:
+    """Frase literal de la tienda sobre envío gratis (se reutiliza en el copy, así que no puede ir cortada)."""
+    for chunk in chunks:
+        for part in re.split(r"\s[·|•–—]\s|(?<=[.!])\s", chunk):
+            if FREE_SHIPPING_RE.search(part):
+                part = part.strip()
+                if len(part) > max_len:
+                    part = part[:max_len].rsplit(" ", 1)[0].rstrip(",;:")
+                if FREE_SHIPPING_RE.search(part):  # si el recorte pierde la palabra clave, mejor no usar nada
+                    return part
+    return ""
+
+
 def classify(url: str, page: _Page) -> str:
     blob = " ".join(page.jsonld)
     if '"Product"' in blob or page.meta.get("og:type") == "product":
@@ -207,9 +223,7 @@ def crawl(base_url: str, max_pages: int = 40, per_type: int = 8, delay: float = 
             continue  # ya hay muestra suficiente de este tipo; prioriza variedad
         per_type_count[ptype] += 1
         signals = detect_signals(page, html.lower())
-        if not free_shipping_text:
-            m = re.search(r"[^.]{0,60}(env[ií]o (gratis|gratuito)|free shipping)[^.]{0,60}", " ".join(page.text), re.I)
-            free_shipping_text = m.group(0).strip() if m else ""
+        free_shipping_text = free_shipping_text or find_free_shipping_text(page.text)
         for k, v in page.selectors.items():
             selectors.setdefault(f"{ptype}:{k}", v)
         pages.append({"url": url, "page_type": ptype, "title": page.title.strip()[:120], "signals": signals})

@@ -62,7 +62,7 @@ def _selector(event: str, profile: dict | None) -> dict:
 
 
 def _copy(event: str, facts: dict) -> dict:
-    ship_body = facts["free_shipping_text"] or "Consulta aquí plazos y costes de envío antes de decidir."
+    ship_body = facts["free_shipping_text"].rstrip(".") + "." if facts["free_shipping_text"] else "Consulta aquí plazos y costes de envío antes de decidir."
     if facts["free_shipping_text"] and facts["returns"]:
         ship_body += " Y puedes devolverlo si no te convence."
     return {
@@ -178,7 +178,7 @@ def _funnel_tools(report: dict, profile: dict | None, facts: dict) -> list[dict]
     cart_to_checkout = steps.get("begin_checkout")
     if cart_to_checkout and cart_to_checkout["pct_of_previous"] < 0.85 and cart_to_checkout["dropoff_from_previous"] >= 30:
         lost = cart_to_checkout["dropoff_from_previous"]
-        body = "Tu carrito sigue guardado. " + (facts["free_shipping_text"] or "Termina tu compra en un par de minutos.")
+        body = "Tu carrito sigue guardado. " + (facts["free_shipping_text"].rstrip(".") + "." if facts["free_shipping_text"] else "Termina tu compra en un par de minutos.")
         out.append({
             "id": "cart_recovery-exit",
             "type": "cart_recovery",
