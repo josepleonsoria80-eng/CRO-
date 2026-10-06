@@ -1,0 +1,15 @@
+[project]
+name = "cro-ai"
+version = "0.1.0"
+description = "Descubre qué comportamientos llevan a comprar en un e-commerce y genera herramientas CRO para guiar al resto de usuarios."
+requires-python = ">=3.10"
+dependencies = []
+
+[project.scripts]
+cro-ai = "cro_ai.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["cro_ai*"]
+
+[tool.setuptools.package-data]
+cro_ai = ["static/*.js"]
